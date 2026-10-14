@@ -137,6 +137,9 @@ def parse_arguments():
     parser.add_argument("--sandbox", choices=sandbox.MODES, help="Default: bwrap if available")
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 1),
                         help="Parallel MBPP+ grading processes")
+    parser.add_argument("--gate",
+                        help="Think gate file (python -m mcqwen.gate fit): prompts it "
+                             "fires on get an empty thinking block, counted as output")
     parser.add_argument("--regrade", action="store_true",
                         help=f"Re-grade a finished run's {RECORDS} without generating again")
     arguments = parser.parse_args()
@@ -269,7 +272,11 @@ def generate(questions, arguments, out):
     open_id, close_id = (tokenizer.convert_tokens_to_ids(tag) for tag in ("<think>", "</think>"))
     # Tokenize before loading the model: it is quick, and a question too long to
     # ask should fail now rather than after twenty seconds of model load.
-    jobs = build_jobs(questions, tokenizer, arguments)
+    forced = {}
+    if arguments.gate:
+        from utils.eval.gate import decide
+        forced = decide(arguments.gate, questions, arguments, tokenizer)
+    jobs = build_jobs(questions, tokenizer, arguments, forced)
     longest = max(len(job["ids"]) for job in jobs)
     if longest > PROMPT_BUDGET:
         raise SystemExit(f"A question is {longest} tokens, over the {PROMPT_BUDGET}-token "
@@ -311,7 +318,7 @@ def load_engine(arguments, longest_generation):
     model = LLM(model=arguments.model, revision=arguments.revision,
                 tokenizer_revision=arguments.revision,
                 max_model_len=longest_generation + PROMPT_BUDGET,
-                gpu_memory_utilization=0.85,
+                gpu_memory_utilization=float(os.environ.get("GPU_MEMORY_UTILIZATION", 0.85)),
                 enable_prefix_caching=False, generation_config="vllm", seed=arguments.seed,
                 enable_lora=rank is not None, max_lora_rank=rank or 16)
     if not arguments.adapter:
@@ -335,14 +342,19 @@ def caps_in_use(questions, arguments):
     return {d: token_cap(d, arguments) for d in sorted({q["dataset"] for q in questions})}
 
 
-def build_jobs(questions, tokenizer, arguments):
-    """One job per (question, sample), seeded from the cohort so runs can be paired."""
+def build_jobs(questions, tokenizer, arguments, forced=None):
+    """One job per (question, sample), seeded from the cohort so runs can be paired.
+
+    forced: {question id: token ids} the reply starts with (a think gate's empty thinking
+    block). They go into the prompt and back into the record as output.
+    """
     jobs = []
     for row in questions:
         ids = tokenizer.apply_chat_template(row["messages"], tokenize=True,
                                             add_generation_prompt=True, enable_thinking=True)
+        force = (forced or {}).get(row["id"], [])
         for sample in range(arguments.samples):
-            jobs.append({"row": row, "ids": ids, "sample": sample,
+            jobs.append({"row": row, "ids": ids + force, "forced": force, "sample": sample,
                          "seed": arguments.seed + row["seed_index"] * 1000 + sample})
     return jobs
 
@@ -353,7 +365,7 @@ def to_record(job, output, lora, tokenizer, eos_ids, open_id, close_id):
     if wrong_route:
         raise ValueError("Adapter routing mismatch")
     result = output.outputs[0]
-    tokens = list(result.token_ids)
+    tokens = job.get("forced", []) + list(result.token_ids)
     final, reasoning, boundary = split_thinking(tokens, open_id, close_id, eos_ids)
     return {"id": job["row"]["id"], "dataset": job["row"]["dataset"],
             "sample_index": job["sample"], "seed": job["seed"],
