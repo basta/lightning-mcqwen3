@@ -10,8 +10,8 @@ The evaluation harness, the training data preparation and the challenge descript
 and a think gate option to `evaluate.py`.
 
 - Write-up: [Lightning McQwen3](https://blog.basta.one/blog/thinkingcap/): how the recipe was
-  found, what didn't work, and interactive figures; [IDEA.md](IDEA.md) is the same story,
-  condensed
+  found, what didn't work, and interactive figures; [IDEA.md](IDEA.md) is the short version:
+  what I tried and why, what worked, what didn't, and the hardware
 - Weights: [basta/lightning-mcqwen3](https://huggingface.co/basta/lightning-mcqwen3) on Hugging
   Face, the LoRA adapter and `gate.pt`
 
