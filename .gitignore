@@ -17,3 +17,6 @@ outputs/
 
 # recipe outputs (scripts/reproduce.sh)
 work/
+
+# the published adapter and gate, from `hf download` (README)
+weights/
