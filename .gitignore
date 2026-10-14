@@ -14,3 +14,6 @@ data/
 
 outputs/
 *.log
+
+# recipe outputs (scripts/reproduce.sh)
+work/
